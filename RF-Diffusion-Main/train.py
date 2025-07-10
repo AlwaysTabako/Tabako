@@ -31,11 +31,15 @@ def _train_impl(replica_id, model, dataset, params):
 def train(params):
     dataset = from_path(params)
     if params.task_id==0:   #task_id=0  ?? WiFi?
-        model = tfdiff_eeg(params).cuda()
-    elif params.task_id==1:
-        model = tfdiff_mimo(params).cuda()
-    else:    
         model = tfdiff_WiFi(params).cuda()
+    elif params.task_id==1:  # FMCW
+        model = tfdiff_fmcw(params).cuda()
+    elif params.task_id==2:  # MIMO
+        model = tfdiff_mimo(params).cuda()
+    elif params.task_id==3:  # EEG    
+        model = tfdiff_eeg(params).cuda()
+    else:
+        raise ValueError("Unexpected task_id.")
     _train_impl(0, model, dataset, params)
 
 

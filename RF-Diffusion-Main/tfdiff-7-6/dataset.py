@@ -7,7 +7,7 @@ import scipy.io as scio
 from tfdiff.params import AttrDict
 from glob import glob
 from torch.utils.data.distributed import DistributedSampler
-from tfdiff.tools.read_bf_file import read_bf_file
+
 
 # data_key='csi_data',
 # gesture_key='gesture',
@@ -28,44 +28,56 @@ def _nested_map(struct, map_fn):
     return map_fn(struct)
 
 
+import os
+import torch
+import scipy.io as scio
+from glob import glob
+from torch.utils.data import Dataset
+
 class WiFiDataset(torch.utils.data.Dataset):
     def __init__(self, paths):
         super().__init__()
-        self.filenames = []
+        self.samples = []  # list of (file, start_idx)
+
+        # 遍历所有 .mat 文件并组合连续的512帧
         for path in paths:
-            self.filenames += glob(f'{path}/**/*.dat', recursive=True)
+            filenames = glob(f'{path}/**/user*.mat', recursive=True)
+            for fname in filenames:
+                data = scio.loadmat(fname, verify_compressed_data_integrity=False)
+                feature = data['feature']  # shape: [N, 90]
+                N = feature.shape[0]
+                
+                # 计算可以提取多少个完整的512帧样本
+                num_samples = N // 512
+                
+                # 记录每个512帧样本的起始位置
+                for i in range(num_samples):
+                    start_idx = i * 512
+                    self.samples.append((fname, start_idx))
+                
+                print(f"从文件 {fname} 中提取了 {num_samples} 个512帧样本")
 
     def __len__(self):
-        return len(self.filenames)
+        return len(self.samples)
 
     def __getitem__(self, idx):
-        cur_filename = self.filenames[idx]
-        csi_list = read_bf_file(cur_filename)  # 解析 .dat 文件
-
-        features = []
-        cond = []
-        for entry in csi_list:
-            csi = entry['csi']  # shape: (n_rx, n_tx, n_subcarriers)
-            amp = np.abs(csi).astype(np.float32)  # shape: (3, 3, 30)
-            if amp.shape != (3, 3, 30):
-                continue  # 跳过格式不对的帧
-            amp_vec = amp.reshape(-1)  # 3*3*30 = 270
-            if len(amp_vec) < 90:
-                continue  # 跳过不足的数据
-            amp_vec = amp_vec[:90]  # 只取前90个分量
-            features.append(amp_vec)
-            cond.append(np.zeros(6, dtype=np.float32))  # 可根据 entry 加入实际标签
-
-        if len(features) == 0:
-            raise ValueError(f"No valid CSI frames in file: {cur_filename}")
-
-        data_tensor = torch.tensor(np.stack(features), dtype=torch.float32)
-        cond_tensor = torch.tensor(np.stack(cond), dtype=torch.float32)
+        fname, start_idx = self.samples[idx]
+        sample = scio.loadmat(fname, verify_compressed_data_integrity=False)
+        
+        # 提取连续512帧作为一个样本
+        features = sample['feature'][start_idx:start_idx+512]  # shape: [512, 90]
+        cond = sample['cond'][start_idx:start_idx+512]  # 使用第一帧的条件
+        
+        # 转换为复数张量
+        feature_tensor = torch.from_numpy(features).to(torch.complex64)  # shape: [512, 90]
+        cond_tensor = torch.from_numpy(cond).to(torch.complex64)  # shape: [512, 6]
 
         return {
-            'data': data_tensor,  # shape: (N, 90)
-            'cond': cond_tensor   # shape: (N, 6)
+            'data': feature_tensor,
+            'cond': cond_tensor
         }
+
+
 
 class FMCWDataset(torch.utils.data.Dataset):
     def __init__(self, paths):
