@@ -66,15 +66,17 @@ class WiFiDataset(torch.utils.data.Dataset):
         
         # 提取连续512帧作为一个样本
         features = sample['feature'][start_idx:start_idx+512]  # shape: [512, 90]
-        cond = sample['cond'][start_idx:start_idx+512]  # 使用第一帧的条件
+        
+        # 只使用第一帧的条件作为整个序列的条件
+        cond = sample['cond'][start_idx]  # shape: [6]
         
         # 转换为复数张量
         feature_tensor = torch.from_numpy(features).to(torch.complex64)  # shape: [512, 90]
-        cond_tensor = torch.from_numpy(cond).to(torch.complex64)  # shape: [512, 6]
-
+        cond_tensor = torch.from_numpy(cond).to(torch.complex64)  # shape: [6]
+        
         return {
-            'data': feature_tensor,
-            'cond': cond_tensor
+            'data': feature_tensor,  # [512, 90]
+            'cond': cond_tensor      # [6]
         }
 
 
